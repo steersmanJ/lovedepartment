@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap } from 'lucide-react';
-import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, collection } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { supabase } from '../supabaseClient';
 
 function getUpcomingSunday() {
   const d = new Date();
@@ -81,48 +79,33 @@ export default function Dashboard() {
 
     setLoading(true);
     
-    // Fetch Date specific data
-    const docRef = doc(db, 'service', selectedDate);
-    const unsubscribeDoc = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setOrders(data.orders || initialServiceOrders);
-        setDetails(data.details || initialDetails);
+    const fetchAllData = async () => {
+      // 1. Schedules
+      const { data: schedData } = await supabase.from('schedules').select('*').eq('date', selectedDate).single();
+      if (schedData) {
+        setOrders(schedData.orders || initialServiceOrders);
+        setDetails(schedData.details || initialDetails);
       } else {
-        setDoc(docRef, { orders: initialServiceOrders, details: initialDetails });
+        await supabase.from('schedules').insert({ date: selectedDate, orders: initialServiceOrders, details: initialDetails });
+        setOrders(initialServiceOrders);
+        setDetails(initialDetails);
       }
-      setLoading(false);
-    }, (error) => {
-      console.error("Firestore Error: ", error);
-      alert("데이터를 불러오는 데 실패했습니다.");
-      setLoading(false);
-    });
 
-    // Fetch Global Songs Library
-    const colRef = collection(db, 'songs_library');
-    const unsubscribeCol = onSnapshot(colRef, (snapshot) => {
-      const list = [];
-      snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
-      setGlobalSongs(list);
-    });
+      // 2. Global Songs
+      const { data: songsData } = await supabase.from('songs').select('*');
+      if (songsData) setGlobalSongs(songsData);
 
-    // Fetch Teachers and Students
-    const membersDocRef = doc(db, 'settings', 'members');
-    const unsubscribeMembers = onSnapshot(membersDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setTeachers(data.teachers || data.departments || []);
-        setStudents(data.students || []);
-      } else {
-        setDoc(membersDocRef, { teachers: [], students: [] });
+      // 3. Members
+      const { data: membersData } = await supabase.from('settings').select('data').eq('id', 'members').single();
+      if (membersData && membersData.data) {
+        setTeachers(membersData.data.teachers || []);
+        setStudents(membersData.data.students || []);
       }
-    });
 
-    return () => {
-      unsubscribeDoc();
-      unsubscribeCol();
-      unsubscribeMembers();
+      setLoading(false);
     };
+
+    fetchAllData();
   }, [navigate, selectedDate]);
 
   const handleLogout = () => {
@@ -132,7 +115,7 @@ export default function Dashboard() {
 
   const saveFirestore = async (newOrders, newDetails = details) => {
     try {
-      await updateDoc(doc(db, 'service', selectedDate), { orders: newOrders, details: newDetails });
+      await supabase.from('schedules').update({ orders: newOrders, details: newDetails }).eq('date', selectedDate);
     } catch (e) {
       console.error("Update failed", e);
       alert("저장에 실패했습니다.");
@@ -141,7 +124,7 @@ export default function Dashboard() {
 
   const saveMembersFirestore = async (newTeachers, newStudents) => {
     try {
-      await updateDoc(doc(db, 'settings', 'members'), { teachers: newTeachers, students: newStudents });
+      await supabase.from('settings').update({ data: { teachers: newTeachers, students: newStudents } }).eq('id', 'members');
     } catch (e) {
       console.error("Members update failed", e);
       alert("데이터 저장에 실패했습니다.");
@@ -232,7 +215,11 @@ export default function Dashboard() {
     
     const existing = globalSongs.find(g => g.title === title);
     if (!existing) {
-      setDoc(doc(db, 'songs_library', Date.now().toString()), { title, imageUrl: imageUrl || null });
+      const addSong = async () => {
+        const { data } = await supabase.from('songs').insert({ title, imageUrl: imageUrl || null }).select().single();
+        if (data) setGlobalSongs(prev => [...prev, data]);
+      };
+      addSong();
     }
   };
 
@@ -265,64 +252,69 @@ export default function Dashboard() {
     const { type, orderId, songId } = currentUploadTarget;
     setUploadingSongId(songId);
 
-    const storagePath = type === 'library' 
-      ? `sheets/global/${songId}_${file.name}`
-      : `sheets/${selectedDate}/${orderId}_${songId}_${file.name}`;
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${songId}_${Date.now()}.${fileExt}`;
+    const filePath = type === 'library' 
+      ? `global/${fileName}`
+      : `${selectedDate}/${fileName}`;
       
-    const storageReference = ref(storage, storagePath);
-    const uploadTask = uploadBytesResumable(storageReference, file);
+    const { error: uploadError } = await supabase.storage.from('sheet-music').upload(filePath, file);
 
-    uploadTask.on(
-      'state_changed',
-      null,
-      (error) => {
-        console.error("Upload failed", error);
-        alert("이미지 업로드에 실패했습니다.");
-        setUploadingSongId(null);
-      },
-      async () => {
-        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        
-        if (type === 'library') {
-          await updateDoc(doc(db, 'songs_library', songId), { imageUrl: downloadURL });
-        } else {
-          // Update order
-          let songTitle = '';
-          const newOrders = orders.map(o => {
-            if (o.id === orderId) {
-              const newSongs = o.songs.map(s => {
-                if (s.id === songId) {
-                  songTitle = s.title;
-                  return { ...s, imageUrl: downloadURL };
-                }
-                return s;
-              });
-              return { ...o, songs: newSongs };
+    if (uploadError) {
+      console.error("Upload failed", uploadError);
+      alert("이미지 업로드에 실패했습니다.");
+      setUploadingSongId(null);
+      e.target.value = '';
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('sheet-music').getPublicUrl(filePath);
+    const downloadURL = publicUrlData.publicUrl;
+
+    if (type === 'library') {
+      await supabase.from('songs').update({ imageUrl: downloadURL }).eq('id', songId);
+      setGlobalSongs(globalSongs.map(s => s.id === songId ? { ...s, imageUrl: downloadURL } : s));
+    } else {
+      // Update order
+      let songTitle = '';
+      const newOrders = orders.map(o => {
+        if (o.id === orderId) {
+          const newSongs = o.songs.map(s => {
+            if (s.id === songId) {
+              songTitle = s.title;
+              return { ...s, imageUrl: downloadURL };
             }
-            return o;
+            return s;
           });
-          setOrders(newOrders);
-          saveFirestore(newOrders);
-
-          if (songTitle) {
-            const existing = globalSongs.find(g => g.title === songTitle);
-            if (existing) {
-              updateDoc(doc(db, 'songs_library', existing.id), { imageUrl: downloadURL });
-            } else {
-              setDoc(doc(db, 'songs_library', Date.now().toString()), { title: songTitle, imageUrl: downloadURL });
-            }
-          }
+          return { ...o, songs: newSongs };
         }
+        return o;
+      });
+      setOrders(newOrders);
+      saveFirestore(newOrders);
 
-        setUploadingSongId(null);
-        setCurrentUploadTarget(null);
-        e.target.value = '';
+      if (songTitle) {
+        const existing = globalSongs.find(g => g.title === songTitle);
+        if (existing) {
+          await supabase.from('songs').update({ imageUrl: downloadURL }).eq('id', existing.id);
+          setGlobalSongs(globalSongs.map(s => s.id === existing.id ? { ...s, imageUrl: downloadURL } : s));
+        } else {
+          const addSong = async () => {
+            const { data } = await supabase.from('songs').insert({ title: songTitle, imageUrl: downloadURL }).select().single();
+            if(data) setGlobalSongs(prev => [...prev, data]);
+          };
+          addSong();
+        }
       }
-    );
+    }
+
+    setUploadingSongId(null);
+    setCurrentUploadTarget(null);
+    e.target.value = '';
   };
 
   // Global Song Manager CRUD
-  const handleAddGlobalSong = () => {
+  const handleAddGlobalSong = async () => {
     const title = prompt("추가할 찬양 제목을 입력하세요");
     if (!title || !title.trim()) return;
     const existing = globalSongs.find(g => g.title === title.trim());
@@ -330,18 +322,21 @@ export default function Dashboard() {
       alert("이미 등록된 찬양입니다.");
       return;
     }
-    setDoc(doc(db, 'songs_library', Date.now().toString()), { title: title.trim(), imageUrl: null });
+    const { data } = await supabase.from('songs').insert({ title: title.trim(), imageUrl: null }).select().single();
+    if(data) setGlobalSongs([...globalSongs, data]);
   };
 
-  const handleEditGlobalSong = (id, oldTitle) => {
+  const handleEditGlobalSong = async (id, oldTitle) => {
     const newTitle = prompt("찬양 제목을 수정하세요", oldTitle);
     if (!newTitle || !newTitle.trim()) return;
-    updateDoc(doc(db, 'songs_library', id), { title: newTitle.trim() });
+    await supabase.from('songs').update({ title: newTitle.trim() }).eq('id', id);
+    setGlobalSongs(globalSongs.map(s => s.id === id ? { ...s, title: newTitle.trim() } : s));
   };
 
   const handleDeleteGlobalSong = async (id, title) => {
     if (!window.confirm(`'${title}' 찬양을 명단에서 삭제하시겠습니까?\n(과거 예배 순서에 입력된 내용은 유지됩니다.)`)) return;
-    await deleteDoc(doc(db, 'songs_library', id));
+    await supabase.from('songs').delete().eq('id', id);
+    setGlobalSongs(globalSongs.filter(s => s.id !== id));
   };
 
 

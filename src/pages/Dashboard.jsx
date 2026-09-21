@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
 function getUpcomingSunday() {
@@ -64,7 +64,7 @@ export default function Dashboard() {
   const [showSongManagerModal, setShowSongManagerModal] = useState(false);
 
   const [uploadingSongId, setUploadingSongId] = useState(null);
-  const [viewImageUrl, setViewImageUrl] = useState(null);
+  const [viewImageState, setViewImageState] = useState(null);
 
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -199,6 +199,29 @@ export default function Dashboard() {
   };
 
   // --- Song Management (Auto Complete & Global Manager) ---
+  const handleOpenGallery = (startUrl) => {
+    const galleryImages = [];
+    orders.forEach(order => {
+      if (order.songs) {
+        order.songs.forEach(song => {
+          if (song.imageUrl) {
+            galleryImages.push({
+              url: song.imageUrl,
+              title: song.title,
+              subtitle: order.name
+            });
+          }
+        });
+      }
+    });
+    const startIndex = galleryImages.findIndex(img => img.url === startUrl);
+    setViewImageState({
+      type: 'gallery',
+      index: startIndex !== -1 ? startIndex : 0,
+      images: galleryImages
+    });
+  };
+
   const handleSelectSong = (orderId, title, imageUrl = null) => {
     if (!title.trim()) return;
     const newOrders = orders.map(o => {
@@ -605,7 +628,7 @@ export default function Dashboard() {
                             </div>
                             <div className="song-actions">
                               {song.imageUrl ? (
-                                <button className="song-btn view-image" onClick={() => setViewImageUrl(song.imageUrl)}>
+                                <button className="song-btn view-image" onClick={() => handleOpenGallery(song.imageUrl)}>
                                   <ImageIcon size={14} /> 악보 보기
                                 </button>
                               ) : (
@@ -701,13 +724,50 @@ export default function Dashboard() {
       </main>
 
       {/* 이미지 팝업 모달 */}
-      {viewImageUrl && (
-        <div className="image-modal-overlay" onClick={() => setViewImageUrl(null)}>
+      {viewImageState && (
+        <div className="image-modal-overlay" onClick={() => setViewImageState(null)}>
           <div className="image-modal-content" onClick={e => e.stopPropagation()}>
-            <button className="image-modal-close" onClick={() => setViewImageUrl(null)}>
-              <X size={24} color="#fff" />
-            </button>
-            <img src={viewImageUrl} alt="찬양 악보" className="sheet-music-image" />
+            <div className="image-modal-header-overlay">
+              {viewImageState.type === 'gallery' && viewImageState.images[viewImageState.index] ? (
+                <div className="image-modal-title">
+                  <div className="title">{viewImageState.images[viewImageState.index].title}</div>
+                  <div className="subtitle">{viewImageState.images[viewImageState.index].subtitle}</div>
+                </div>
+              ) : (
+                <div className="image-modal-title">
+                  <div className="title">{viewImageState.title || ''}</div>
+                  <div className="subtitle">찬양 라이브러리</div>
+                </div>
+              )}
+              <div className="image-modal-actions">
+                <button className="image-modal-btn" onClick={() => {
+                  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(e=>console.log(e));
+                  else document.exitFullscreen();
+                }}>
+                  <Maximize size={24} color="#fff" />
+                </button>
+                <button className="image-modal-btn" onClick={() => setViewImageState(null)}>
+                  <X size={24} color="#fff" />
+                </button>
+              </div>
+            </div>
+            
+            {viewImageState.type === 'gallery' && viewImageState.images.length > 1 && (
+              <>
+                <button className="image-modal-nav prev" onClick={(e) => { e.stopPropagation(); setViewImageState(prev => ({...prev, index: (prev.index - 1 + prev.images.length) % prev.images.length})) }}>
+                  <ChevronLeft size={36} color="#fff" />
+                </button>
+                <button className="image-modal-nav next" onClick={(e) => { e.stopPropagation(); setViewImageState(prev => ({...prev, index: (prev.index + 1) % prev.images.length})) }}>
+                  <ChevronRight size={36} color="#fff" />
+                </button>
+              </>
+            )}
+
+            <img 
+              src={viewImageState.type === 'gallery' ? viewImageState.images[viewImageState.index].url : viewImageState.url} 
+              alt="찬양 악보" 
+              className="sheet-music-image" 
+            />
           </div>
         </div>
       )}
@@ -785,7 +845,7 @@ export default function Dashboard() {
                     </span>
                     <div className="member-actions">
                       {song.imageUrl ? (
-                        <button className="edit-btn" style={{ color: 'var(--primary)', padding: '6px' }} onClick={() => setViewImageUrl(song.imageUrl)}>
+                        <button className="edit-btn" style={{ color: 'var(--primary)', padding: '6px' }} onClick={() => setViewImageState({ type: 'single', url: song.imageUrl, title: song.title })}>
                           <ImageIcon size={14} />
                         </button>
                       ) : (

@@ -92,7 +92,7 @@ export default function Dashboard() {
       }
 
       // 2. Global Songs
-      const { data: songsData } = await supabase.from('songs').select('*');
+      const { data: songsData } = await supabase.from('songs').select('id, title, imageUrl:imageurl');
       if (songsData) setGlobalSongs(songsData);
 
       // 3. Members
@@ -239,7 +239,7 @@ export default function Dashboard() {
     const existing = globalSongs.find(g => g.title === title);
     if (!existing) {
       const addSong = async () => {
-        const { data } = await supabase.from('songs').insert({ title, imageUrl: imageUrl || null }).select().single();
+        const { data } = await supabase.from('songs').insert({ title, imageurl: imageUrl || null }).select('id, title, imageUrl:imageurl').single();
         if (data) setGlobalSongs(prev => [...prev, data]);
       };
       addSong();
@@ -295,7 +295,7 @@ export default function Dashboard() {
     const downloadURL = publicUrlData.publicUrl;
 
     if (type === 'library') {
-      await supabase.from('songs').update({ imageUrl: downloadURL }).eq('id', songId);
+      await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', songId);
       setGlobalSongs(globalSongs.map(s => s.id === songId ? { ...s, imageUrl: downloadURL } : s));
     } else {
       // Update order
@@ -319,11 +319,11 @@ export default function Dashboard() {
       if (songTitle) {
         const existing = globalSongs.find(g => g.title === songTitle);
         if (existing) {
-          await supabase.from('songs').update({ imageUrl: downloadURL }).eq('id', existing.id);
+          await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', existing.id);
           setGlobalSongs(globalSongs.map(s => s.id === existing.id ? { ...s, imageUrl: downloadURL } : s));
         } else {
           const addSong = async () => {
-            const { data } = await supabase.from('songs').insert({ title: songTitle, imageUrl: downloadURL }).select().single();
+            const { data } = await supabase.from('songs').insert({ title: songTitle, imageurl: downloadURL }).select('id, title, imageUrl:imageurl').single();
             if(data) setGlobalSongs(prev => [...prev, data]);
           };
           addSong();
@@ -345,7 +345,7 @@ export default function Dashboard() {
       alert("이미 등록된 찬양입니다.");
       return;
     }
-    const { data } = await supabase.from('songs').insert({ title: title.trim(), imageUrl: null }).select().single();
+    const { data } = await supabase.from('songs').insert({ title: title.trim(), imageurl: null }).select('id, title, imageUrl:imageurl').single();
     if(data) setGlobalSongs([...globalSongs, data]);
   };
 

@@ -632,10 +632,10 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* 이미지 / 슬라이드 리스트 (모든 순서 허용) */}
-                {!editingId && (isOrderEditMode || (order.songs && order.songs.length > 0)) && (
+                {/* 이미지 / 슬라이드 리스트 (모든 순서 항상 허용) */}
+                {!editingId && (
                   <div className={`song-list-container ${isOrderEditMode ? 'edit-mode-active' : ''}`}>
-                    {order.songs && order.songs.length > 0 ? (
+                    {order.songs && order.songs.length > 0 && (
                       <ul className="song-list">
                         {order.songs.map((song, idx) => (
                           <li key={song.id} className="song-item">
@@ -665,11 +665,9 @@ export default function Dashboard() {
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <div className="empty-songs">등록된 슬라이드(이미지/악보)가 없습니다.</div>
                     )}
                     <button className="add-song-btn" onClick={() => { setShowSongModalForOrder(order.id); setSongSearchText(''); }}>
-                      <Plus size={14} /> 슬라이드 추가하기
+                      <Plus size={14} /> {order.songs && order.songs.length > 0 ? '슬라이드 추가하기' : '슬라이드(이미지/악보) 첨부'}
                     </button>
                   </div>
                 )}

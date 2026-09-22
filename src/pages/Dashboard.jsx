@@ -562,16 +562,16 @@ export default function Dashboard() {
                               }}
                             >
                               <option value="">▼ 선택</option>
-                              {teachers.map(d => (
+                              {teachers && teachers.map(d => (
                                 <optgroup label={`[교사] ${d.name}`} key={`t-${d.id}`}>
-                                  {d.members.map(m => (
+                                  {d.members && d.members.map(m => (
                                     <option value={m.name} key={`m-${m.id}`}>{m.name}</option>
                                   ))}
                                 </optgroup>
                               ))}
-                              {students.map(d => (
+                              {students && students.map(d => (
                                 <optgroup label={`[학생] ${d.name}`} key={`s-${d.id}`}>
-                                  {d.members.map(m => (
+                                  {d.members && d.members.map(m => (
                                     <option value={m.name} key={`m-${m.id}`}>{m.name}</option>
                                   ))}
                                 </optgroup>
@@ -586,7 +586,7 @@ export default function Dashboard() {
                           <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="text-input name-input" />
                         </div>
                       </div>
-                      {editName.includes('말씀 선포') && (
+                      {(editName || '').includes('말씀 선포') && (
                         <div className="edit-sermon-row">
                           <div className="input-with-label">
                             <label>성경 구절 (예: 요한복음 3:16)</label>

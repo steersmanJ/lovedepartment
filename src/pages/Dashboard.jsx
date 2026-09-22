@@ -562,16 +562,16 @@ export default function Dashboard() {
                               }}
                             >
                               <option value="">▼ 선택</option>
-                              {teachers && teachers.map(d => (
+                              {Array.isArray(teachers) && teachers.map(d => (
                                 <optgroup label={`[교사] ${d.name}`} key={`t-${d.id}`}>
-                                  {d.members && d.members.map(m => (
+                                  {Array.isArray(d.members) && d.members.map(m => (
                                     <option value={m.name} key={`m-${m.id}`}>{m.name}</option>
                                   ))}
                                 </optgroup>
                               ))}
-                              {students && students.map(d => (
+                              {Array.isArray(students) && students.map(d => (
                                 <optgroup label={`[학생] ${d.name}`} key={`s-${d.id}`}>
-                                  {d.members && d.members.map(m => (
+                                  {Array.isArray(d.members) && d.members.map(m => (
                                     <option value={m.name} key={`m-${m.id}`}>{m.name}</option>
                                   ))}
                                 </optgroup>

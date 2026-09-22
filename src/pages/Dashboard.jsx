@@ -632,8 +632,8 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* 찬양 리스트 */}
-                {(order.name.includes('예배 전 찬양') || order.name === '찬양' || order.songs) && !editingId && (
+                {/* 이미지 / 슬라이드 리스트 (모든 순서 허용) */}
+                {!editingId && (isOrderEditMode || (order.songs && order.songs.length > 0)) && (
                   <div className={`song-list-container ${isOrderEditMode ? 'edit-mode-active' : ''}`}>
                     {order.songs && order.songs.length > 0 ? (
                       <ul className="song-list">
@@ -666,10 +666,10 @@ export default function Dashboard() {
                         ))}
                       </ul>
                     ) : (
-                      <div className="empty-songs">등록된 찬양이 없습니다.</div>
+                      <div className="empty-songs">등록된 슬라이드(이미지/악보)가 없습니다.</div>
                     )}
                     <button className="add-song-btn" onClick={() => { setShowSongModalForOrder(order.id); setSongSearchText(''); }}>
-                      <Plus size={14} /> 찬양 곡 추가하기
+                      <Plus size={14} /> 슬라이드 추가하기
                     </button>
                   </div>
                 )}
@@ -777,6 +777,17 @@ export default function Dashboard() {
                 <button className="image-modal-nav next" onClick={(e) => { e.stopPropagation(); setViewImageState(prev => ({...prev, index: (prev.index + 1) % prev.images.length})) }}>
                   <ChevronRight size={36} color="#fff" />
                 </button>
+                <div className="thumbnail-strip" onClick={e => e.stopPropagation()}>
+                  {viewImageState.images.map((img, idx) => (
+                    <img 
+                      key={idx}
+                      src={img.url}
+                      className={`thumbnail-img ${idx === viewImageState.index ? 'active' : ''}`}
+                      onClick={() => setViewImageState(prev => ({...prev, index: idx}))}
+                      alt="썸네일"
+                    />
+                  ))}
+                </div>
               </>
             )}
 

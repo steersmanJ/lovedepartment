@@ -1,9 +1,13 @@
 import { supabase } from './src/supabaseClient.js';
 
 async function run() {
-  console.log("Trying to insert song with imageurl (lowercase)...");
-  let insertRes = await supabase.from('songs').insert({ title: 'Test Song 3', imageurl: null }).select().single();
-  console.log("Insert result:", insertRes.error || insertRes.data);
+  console.log("Trying to insert into songs...");
+  let { data, error } = await supabase.from('songs').insert({ title: 'Test from script', imageurl: null }).select('id, title, imageUrl:imageurl').single();
+  if (error) {
+    console.error("Error:", error);
+  } else {
+    console.log("Success:", data);
+  }
 }
 
 run();

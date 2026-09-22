@@ -115,7 +115,11 @@ export default function Dashboard() {
 
   const saveFirestore = async (newOrders, newDetails = details) => {
     try {
-      await supabase.from('schedules').update({ orders: newOrders, details: newDetails }).eq('date', selectedDate);
+      const { error } = await supabase.from('schedules').update({ orders: newOrders, details: newDetails }).eq('date', selectedDate);
+      if (error) {
+        console.error("Supabase update error:", error);
+        alert("일정 저장에 실패했습니다: " + error.message);
+      }
     } catch (e) {
       console.error("Update failed", e);
       alert("저장에 실패했습니다.");
@@ -124,7 +128,11 @@ export default function Dashboard() {
 
   const saveMembersFirestore = async (newTeachers, newStudents) => {
     try {
-      await supabase.from('settings').update({ data: { teachers: newTeachers, students: newStudents } }).eq('id', 'members');
+      const { error } = await supabase.from('settings').update({ data: { teachers: newTeachers, students: newStudents } }).eq('id', 'members');
+      if (error) {
+        console.error("Supabase members error:", error);
+        alert("명단 저장에 실패했습니다: " + error.message);
+      }
     } catch (e) {
       console.error("Members update failed", e);
       alert("데이터 저장에 실패했습니다.");
@@ -239,7 +247,11 @@ export default function Dashboard() {
     const existing = globalSongs.find(g => g.title === title);
     if (!existing) {
       const addSong = async () => {
-        const { data } = await supabase.from('songs').insert({ title, imageurl: imageUrl || null }).select('id, title, imageUrl:imageurl').single();
+        const { data, error } = await supabase.from('songs').insert({ title, imageurl: imageUrl || null }).select('id, title, imageUrl:imageurl').single();
+        if (error) {
+          console.error("Error inserting global song:", error);
+          alert("찬양 곡 등록에 실패했습니다: " + error.message);
+        }
         if (data) setGlobalSongs(prev => [...prev, data]);
       };
       addSong();
@@ -319,11 +331,13 @@ export default function Dashboard() {
       if (songTitle) {
         const existing = globalSongs.find(g => g.title === songTitle);
         if (existing) {
-          await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', existing.id);
+          const { error } = await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', existing.id);
+          if (error) alert("찬양 이미지 업데이트 실패: " + error.message);
           setGlobalSongs(globalSongs.map(s => s.id === existing.id ? { ...s, imageUrl: downloadURL } : s));
         } else {
           const addSong = async () => {
-            const { data } = await supabase.from('songs').insert({ title: songTitle, imageurl: downloadURL }).select('id, title, imageUrl:imageurl').single();
+            const { data, error } = await supabase.from('songs').insert({ title: songTitle, imageurl: downloadURL }).select('id, title, imageUrl:imageurl').single();
+            if (error) alert("찬양 등록 실패: " + error.message);
             if(data) setGlobalSongs(prev => [...prev, data]);
           };
           addSong();
@@ -336,7 +350,6 @@ export default function Dashboard() {
     e.target.value = '';
   };
 
-  // Global Song Manager CRUD
   const handleAddGlobalSong = async () => {
     const title = prompt("추가할 찬양 제목을 입력하세요");
     if (!title || !title.trim()) return;
@@ -345,7 +358,11 @@ export default function Dashboard() {
       alert("이미 등록된 찬양입니다.");
       return;
     }
-    const { data } = await supabase.from('songs').insert({ title: title.trim(), imageurl: null }).select('id, title, imageUrl:imageurl').single();
+    const { data, error } = await supabase.from('songs').insert({ title: title.trim(), imageurl: null }).select('id, title, imageUrl:imageurl').single();
+    if (error) {
+      alert("찬양 추가 실패: " + error.message);
+      return;
+    }
     if(data) setGlobalSongs([...globalSongs, data]);
   };
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
 function getUpcomingSunday() {
@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [globalSongs, setGlobalSongs] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [students, setStudents] = useState([]);
+  const [materials, setMaterials] = useState([]);
 
   // UI States
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
@@ -65,6 +66,13 @@ export default function Dashboard() {
 
   const [uploadingSongId, setUploadingSongId] = useState(null);
   const [viewImageState, setViewImageState] = useState(null);
+
+  // Admin States
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
+  const [showAdminPanelModal, setShowAdminPanelModal] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [newMaterialContent, setNewMaterialContent] = useState('');
+  const [isUploadingMaterial, setIsUploadingMaterial] = useState(false);
 
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -101,6 +109,10 @@ export default function Dashboard() {
         setTeachers(membersData.data.teachers || []);
         setStudents(membersData.data.students || []);
       }
+
+      // 4. Materials
+      const { data: materialsData } = await supabase.from('materials').select('*').order('created_at', { ascending: false });
+      if (materialsData) setMaterials(materialsData);
 
       setLoading(false);
     };
@@ -457,6 +469,62 @@ export default function Dashboard() {
     }
   };
 
+  // --- Admin Materials Management ---
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    if (adminPasswordInput === '5257') {
+      setShowAdminAuthModal(false);
+      setShowAdminPanelModal(true);
+      setAdminPasswordInput('');
+    } else {
+      alert("비밀번호가 틀렸습니다.");
+      setAdminPasswordInput('');
+    }
+  };
+
+  const handleAddMaterial = async (e) => {
+    e.preventDefault();
+    const file = e.target.materialFile.files[0];
+    if (!newMaterialContent.trim() && !file) return;
+
+    setIsUploadingMaterial(true);
+    let fileUrl = null;
+    let fileName = null;
+
+    if (file) {
+      const ext = file.name.split('.').pop();
+      const uniqueName = `mat_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('sheet-music').upload(`materials/${uniqueName}`, file);
+      if (uploadError) {
+        alert("파일 업로드 실패: " + uploadError.message);
+        setIsUploadingMaterial(false);
+        return;
+      }
+      const { data: publicUrlData } = supabase.storage.from('sheet-music').getPublicUrl(`materials/${uniqueName}`);
+      fileUrl = publicUrlData.publicUrl;
+      fileName = file.name;
+    }
+
+    const newMat = { content: newMaterialContent.trim(), fileUrl, fileName };
+    const { data, error } = await supabase.from('materials').insert(newMat).select().single();
+    if (error) {
+      alert("등록 실패: " + error.message);
+    } else {
+      setMaterials([data, ...materials]);
+      setNewMaterialContent('');
+      e.target.reset();
+    }
+    setIsUploadingMaterial(false);
+  };
+
+  const handleDeleteMaterial = async (id) => {
+    if (!window.confirm("이 항목을 삭제하시겠습니까?")) return;
+    const { error } = await supabase.from('materials').delete().eq('id', id);
+    if (error) alert("삭제 실패: " + error.message);
+    else setMaterials(materials.filter(m => m.id !== id));
+  };
+
+
 
   if (loading && orders.length === 0) {
     return (
@@ -495,6 +563,9 @@ export default function Dashboard() {
             </button>
             <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setActiveModalType('student')}>
               <GraduationCap size={14} /> 학생 관리
+            </button>
+            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setShowAdminAuthModal(true)} title="관리자 메뉴">
+              <Settings size={14} /> 관리자
             </button>
             <button className="logout-btn" style={{ padding: '6px' }} onClick={handleLogout} title="로그아웃">
               <LogOut size={14} />
@@ -736,6 +807,30 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* 공지사항 및 자료 카드 */}
+        {materials.length > 0 && (
+          <div className="card materials-card" style={{ marginTop: '24px' }}>
+            <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileText size={20} /> 공지사항 및 자료
+            </h2>
+            <div className="materials-list">
+              {materials.map(mat => (
+                <div key={mat.id} className="material-item">
+                  {mat.content && <div className="material-content" style={{ whiteSpace: 'pre-line', marginBottom: mat.fileName ? '12px' : '0' }}>{mat.content}</div>}
+                  {mat.fileName && (
+                    <a href={mat.fileUrl} target="_blank" rel="noopener noreferrer" className="material-file-btn btn btn-secondary">
+                      <Download size={14} /> {mat.fileName}
+                    </a>
+                  )}
+                  <div className="material-date">
+                    {new Date(mat.created_at).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </main>
 
       {/* 이미지 팝업 모달 */}
@@ -794,6 +889,84 @@ export default function Dashboard() {
               alt="찬양 악보" 
               className="sheet-music-image" 
             />
+          </div>
+        </div>
+      )}
+
+      {/* 관리자 인증 모달 */}
+      {showAdminAuthModal && (
+        <div className="song-modal-overlay" onClick={() => setShowAdminAuthModal(false)}>
+          <div className="song-modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '300px' }}>
+            <div className="song-modal-header">
+              <h3>관리자 메뉴</h3>
+              <button className="song-modal-close" onClick={() => setShowAdminAuthModal(false)}><X size={20} /></button>
+            </div>
+            <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+              <input 
+                type="password" 
+                value={adminPasswordInput} 
+                onChange={e => setAdminPasswordInput(e.target.value)} 
+                placeholder="비밀번호 4자리" 
+                className="text-input" 
+                autoFocus 
+                style={{ textAlign: 'center' }}
+              />
+              <button type="submit" className="btn btn-primary" style={{ padding: '12px' }}>확인</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 관리자 대시보드 모달 */}
+      {showAdminPanelModal && (
+        <div className="song-modal-overlay" onClick={() => setShowAdminPanelModal(false)}>
+          <div className="song-modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '90%' }}>
+            <div className="song-modal-header">
+              <h3>관리자 메뉴 (공지 및 자료 등록)</h3>
+              <button className="song-modal-close" onClick={() => setShowAdminPanelModal(false)}><X size={20} /></button>
+            </div>
+            
+            <div style={{ padding: '16px 0' }}>
+              <form onSubmit={handleAddMaterial} className="admin-material-form" style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8f9fa', padding: '16px', borderRadius: '8px' }}>
+                <h4>새로운 공지/자료 올리기</h4>
+                <textarea 
+                  className="text-input" 
+                  placeholder="공지사항이나 안내할 텍스트를 입력하세요" 
+                  value={newMaterialContent}
+                  onChange={e => setNewMaterialContent(e.target.value)}
+                  style={{ minHeight: '80px', resize: 'vertical' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <input type="file" name="materialFile" id="materialFile" className="text-input" style={{ flex: 1, padding: '8px' }} />
+                  <button type="submit" className="btn btn-primary" disabled={isUploadingMaterial} style={{ padding: '8px 24px', whiteSpace: 'nowrap' }}>
+                    {isUploadingMaterial ? <><Loader2 size={16} className="spin" /> 업로드중</> : '등록하기'}
+                  </button>
+                </div>
+              </form>
+
+              <h4 style={{ marginTop: '24px', marginBottom: '12px' }}>등록된 항목 관리</h4>
+              <div className="admin-materials-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto' }}>
+                {materials.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>등록된 항목이 없습니다.</p> : null}
+                {materials.map(mat => (
+                  <div key={mat.id} style={{ border: '1px solid #eee', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      {mat.content && <div style={{ fontSize: '0.9rem', marginBottom: '8px', whiteSpace: 'pre-line' }}>{mat.content}</div>}
+                      {mat.fileName && (
+                        <div style={{ fontSize: '0.85rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <FileText size={14} /> {mat.fileName}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '0.75rem', color: '#999', marginTop: '8px' }}>
+                        {new Date(mat.created_at).toLocaleString('ko-KR')}
+                      </div>
+                    </div>
+                    <button className="btn" style={{ padding: '6px', color: 'var(--error)', backgroundColor: '#fff', border: '1px solid #ffebee' }} onClick={() => handleDeleteMaterial(mat.id)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

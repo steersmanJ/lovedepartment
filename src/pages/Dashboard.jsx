@@ -111,7 +111,7 @@ export default function Dashboard() {
       }
 
       // 4. Materials
-      const { data: materialsData } = await supabase.from('materials').select('*').order('created_at', { ascending: false });
+      const { data: materialsData } = await supabase.from('materials').select('id, content, fileName:filename, fileUrl:fileurl, created_at').order('created_at', { ascending: false });
       if (materialsData) setMaterials(materialsData);
 
       setLoading(false);
@@ -505,8 +505,8 @@ export default function Dashboard() {
       fileName = file.name;
     }
 
-    const newMat = { content: newMaterialContent.trim(), fileUrl, fileName };
-    const { data, error } = await supabase.from('materials').insert(newMat).select().single();
+    const newMat = { content: newMaterialContent.trim(), fileurl: fileUrl, filename: fileName };
+    const { data, error } = await supabase.from('materials').insert(newMat).select('id, content, fileName:filename, fileUrl:fileurl, created_at').single();
     if (error) {
       alert("등록 실패: " + error.message);
     } else {

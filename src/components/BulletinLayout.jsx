@@ -27,7 +27,7 @@ const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers,
         <div className="bulletin-date">{date}</div>
         
         <div className="bulletin-orders">
-          {orders.map((order, idx) => (
+          {Array.isArray(orders) && orders.map((order, idx) => (
             <div key={idx} className="bulletin-order-item">
               <div className="order-time">{order.time}</div>
               <div className="order-name">{order.name}</div>
@@ -42,7 +42,7 @@ const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers,
         <h2 className="bulletin-title">오늘의 말씀</h2>
         
         {/* Find the sermon order to display title and scriptureRef */}
-        {orders.filter(o => o.name.includes('말씀')).map((sermon, idx) => (
+        {Array.isArray(orders) && orders.filter(o => (o.name || '').includes('말씀')).map((sermon, idx) => (
           <div key={idx} className="bulletin-sermon-header">
             <div className="sermon-title">{sermon.sermonTitle}</div>
             <div className="sermon-ref">{sermon.scriptureRef}</div>
@@ -75,9 +75,9 @@ const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers,
 
         <h2 className="bulletin-title" style={{ marginTop: '20px' }}>섬기는 사람들</h2>
         <div className="bulletin-people">
-          {teachers && teachers.map((dept, idx) => (
+          {Array.isArray(teachers) && teachers.map((dept, idx) => (
             <div key={idx} className="bulletin-dept">
-              <strong>{dept.name}</strong>: {dept.members && dept.members.map(m => m.name).join(', ')}
+              <strong>{dept.name}</strong>: {Array.isArray(dept.members) ? dept.members.map(m => m.name).join(', ') : ''}
             </div>
           ))}
         </div>

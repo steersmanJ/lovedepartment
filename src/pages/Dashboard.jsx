@@ -82,8 +82,8 @@ export default function Dashboard() {
   const [currentUploadTarget, setCurrentUploadTarget] = useState(null);
 
   const handlePrint = useReactToPrint({
-    content: () => printRef.current,
-    documentTitle: `사랑부_주보_${selectedDate}`,
+    contentRef: printRef,
+    documentTitle: () => `사랑부_주보_${selectedDate}`,
   });
 
   useEffect(() => {

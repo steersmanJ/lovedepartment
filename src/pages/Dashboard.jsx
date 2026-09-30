@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download, Printer } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { useReactToPrint } from 'react-to-print';
+import BulletinLayout from '../components/BulletinLayout';
 
 function getUpcomingSunday() {
   const d = new Date();
@@ -76,7 +78,13 @@ export default function Dashboard() {
 
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const printRef = useRef(null);
   const [currentUploadTarget, setCurrentUploadTarget] = useState(null);
+
+  const handlePrint = useReactToPrint({
+    content: () => printRef.current,
+    documentTitle: `사랑부_주보_${selectedDate}`,
+  });
 
   useEffect(() => {
     const isAuth = localStorage.getItem('isAuthenticated');
@@ -567,6 +575,9 @@ export default function Dashboard() {
             <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setShowAdminAuthModal(true)} title="관리자 메뉴">
               <Settings size={14} /> 관리자
             </button>
+            <button className="logout-btn" style={{ backgroundColor: '#2196f3', color: 'white', padding: '6px 12px', fontWeight: 'bold' }} onClick={handlePrint} title="주보 인쇄 및 PDF 저장">
+              <Printer size={14} /> 주보 인쇄/PDF
+            </button>
             <button className="logout-btn" style={{ padding: '6px' }} onClick={handleLogout} title="로그아웃">
               <LogOut size={14} />
             </button>
@@ -832,6 +843,19 @@ export default function Dashboard() {
         )}
 
       </main>
+
+      <div style={{ display: 'none' }}>
+        <BulletinLayout 
+          ref={printRef} 
+          date={selectedDate} 
+          orders={orders} 
+          details={details} 
+          materials={materials} 
+          teachers={teachers} 
+          students={students} 
+          bgImageUrl={null} // 추후 관리자 메뉴에서 배경 이미지 업로드 시 연동 가능
+        />
+      </div>
 
       {/* 이미지 팝업 모달 */}
       {viewImageState && (

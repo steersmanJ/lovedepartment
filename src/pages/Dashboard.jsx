@@ -2,8 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download, Printer } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { deleteFileFromStorage } from '../utils';
 import { useReactToPrint } from 'react-to-print';
 import BulletinLayout from '../components/BulletinLayout';
+import Toast from '../components/Toast';
+import AdminPanelModal from '../components/AdminPanelModal';
+import SongManagerModal from '../components/SongManagerModal';
+import MemberManagerModal from '../components/MemberManagerModal';
 
 function getUpcomingSunday() {
   const d = new Date();
@@ -86,16 +91,21 @@ export default function Dashboard() {
     documentTitle: () => `사랑부_주보_${selectedDate}`,
   });
 
-  useEffect(() => {
-    const isAuth = localStorage.getItem('isAuthenticated');
-    if (!isAuth) {
-      navigate('/login');
-      return;
-    }
+  const [userEmail, setUserEmail] = useState(null);
 
-    setLoading(true);
-    
-    const fetchAllData = async () => {
+  useEffect(() => {
+    const checkAuthAndFetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        localStorage.removeItem('isAuthenticated');
+        navigate('/login');
+        return;
+      }
+      
+      setUserEmail(session.user.email);
+      setLoading(true);
+      
       // 1. Schedules
       const { data: schedData } = await supabase.from('schedules').select('*').eq('date', selectedDate).single();
       if (schedData) {
@@ -125,10 +135,11 @@ export default function Dashboard() {
       setLoading(false);
     };
 
-    fetchAllData();
+    checkAuthAndFetchData();
   }, [navigate, selectedDate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem('isAuthenticated');
     navigate('/login');
   };
@@ -278,10 +289,16 @@ export default function Dashboard() {
     }
   };
 
-  const removeSong = (orderId, songId) => {
+  const removeSong = async (orderId, songId) => {
     if (!window.confirm("이 찬양을 삭제하시겠습니까?")) return;
+    
     const newOrders = orders.map(o => {
       if (o.id === orderId) {
+        const songToRemove = o.songs.find(s => s.id === songId);
+        if (songToRemove && songToRemove.imageUrl) {
+          // 비동기로 스토리지 파일 삭제
+          deleteFileFromStorage(songToRemove.imageUrl);
+        }
         return { ...o, songs: o.songs.filter(s => s.id !== songId) };
       }
       return o;
@@ -337,6 +354,10 @@ export default function Dashboard() {
           const newSongs = o.songs.map(s => {
             if (s.id === songId) {
               songTitle = s.title;
+              if (s.imageUrl) {
+                // 기존 이미지가 있다면 스토리지에서 삭제
+                deleteFileFromStorage(s.imageUrl);
+              }
               return { ...s, imageUrl: downloadURL };
             }
             return s;
@@ -393,8 +414,12 @@ export default function Dashboard() {
     setGlobalSongs(globalSongs.map(s => s.id === id ? { ...s, title: newTitle.trim() } : s));
   };
 
-  const handleDeleteGlobalSong = async (id, title) => {
+  const handleDeleteGlobalSong = async (id, title, imageUrl) => {
     if (!window.confirm(`'${title}' 찬양을 명단에서 삭제하시겠습니까?\n(과거 예배 순서에 입력된 내용은 유지됩니다.)`)) return;
+    
+    if (imageUrl) {
+      deleteFileFromStorage(imageUrl);
+    }
     await supabase.from('songs').delete().eq('id', id);
     setGlobalSongs(globalSongs.filter(s => s.id !== id));
   };
@@ -478,9 +503,20 @@ export default function Dashboard() {
   };
 
   // --- Admin Materials Management ---
-  const handleAdminLogin = (e) => {
+  const handleAdminMenuClick = () => {
+    if (userEmail === 'admin@loveservice.com') {
+      setShowAdminPanelModal(true);
+    } else {
+      setShowAdminAuthModal(true);
+    }
+  };
+
+  const handleAdminLogin = async (e) => {
     e.preventDefault();
     if (adminPasswordInput === '5257') {
+      // Background upgrade to admin
+      await supabase.auth.signInWithPassword({ email: 'admin@loveservice.com', password: '525700' });
+      setUserEmail('admin@loveservice.com');
       setShowAdminAuthModal(false);
       setShowAdminPanelModal(true);
       setAdminPasswordInput('');
@@ -527,6 +563,12 @@ export default function Dashboard() {
 
   const handleDeleteMaterial = async (id) => {
     if (!window.confirm("이 항목을 삭제하시겠습니까?")) return;
+    
+    const matToDelete = materials.find(m => m.id === id);
+    if (matToDelete && matToDelete.fileUrl) {
+      deleteFileFromStorage(matToDelete.fileUrl);
+    }
+
     const { error } = await supabase.from('materials').delete().eq('id', id);
     if (error) alert("삭제 실패: " + error.message);
     else setMaterials(materials.filter(m => m.id !== id));
@@ -572,7 +614,7 @@ export default function Dashboard() {
             <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setActiveModalType('student')}>
               <GraduationCap size={14} /> 학생 관리
             </button>
-            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setShowAdminAuthModal(true)} title="관리자 메뉴">
+            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={handleAdminMenuClick} title="관리자 메뉴">
               <Settings size={14} /> 관리자
             </button>
             <button className="logout-btn" style={{ backgroundColor: '#2196f3', color: 'white', padding: '6px 12px', fontWeight: 'bold' }} onClick={handlePrint} title="주보 인쇄 및 PDF 저장">
@@ -943,56 +985,15 @@ export default function Dashboard() {
 
       {/* 관리자 대시보드 모달 */}
       {showAdminPanelModal && (
-        <div className="song-modal-overlay" onClick={() => setShowAdminPanelModal(false)}>
-          <div className="song-modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '90%' }}>
-            <div className="song-modal-header">
-              <h3>관리자 메뉴 (공지 및 자료 등록)</h3>
-              <button className="song-modal-close" onClick={() => setShowAdminPanelModal(false)}><X size={20} /></button>
-            </div>
-            
-            <div style={{ padding: '16px 0' }}>
-              <form onSubmit={handleAddMaterial} className="admin-material-form" style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8f9fa', padding: '16px', borderRadius: '8px' }}>
-                <h4>새로운 공지/자료 올리기</h4>
-                <textarea 
-                  className="text-input" 
-                  placeholder="공지사항이나 안내할 텍스트를 입력하세요" 
-                  value={newMaterialContent}
-                  onChange={e => setNewMaterialContent(e.target.value)}
-                  style={{ minHeight: '80px', resize: 'vertical' }}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <input type="file" name="materialFile" id="materialFile" className="text-input" style={{ flex: 1, padding: '8px' }} />
-                  <button type="submit" className="btn btn-primary" disabled={isUploadingMaterial} style={{ padding: '8px 24px', whiteSpace: 'nowrap' }}>
-                    {isUploadingMaterial ? <><Loader2 size={16} className="spin" /> 업로드중</> : '등록하기'}
-                  </button>
-                </div>
-              </form>
-
-              <h4 style={{ marginTop: '24px', marginBottom: '12px' }}>등록된 항목 관리</h4>
-              <div className="admin-materials-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto' }}>
-                {materials.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>등록된 항목이 없습니다.</p> : null}
-                {materials.map(mat => (
-                  <div key={mat.id} style={{ border: '1px solid #eee', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      {mat.content && <div style={{ fontSize: '0.9rem', marginBottom: '8px', whiteSpace: 'pre-line' }}>{mat.content}</div>}
-                      {mat.fileName && (
-                        <div style={{ fontSize: '0.85rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <FileText size={14} /> {mat.fileName}
-                        </div>
-                      )}
-                      <div style={{ fontSize: '0.75rem', color: '#999', marginTop: '8px' }}>
-                        {new Date(mat.created_at).toLocaleString('ko-KR')}
-                      </div>
-                    </div>
-                    <button className="btn" style={{ padding: '6px', color: 'var(--error)', backgroundColor: '#fff', border: '1px solid #ffebee' }} onClick={() => handleDeleteMaterial(mat.id)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <AdminPanelModal 
+          onClose={() => setShowAdminPanelModal(false)}
+          materials={materials}
+          handleAddMaterial={handleAddMaterial}
+          handleDeleteMaterial={handleDeleteMaterial}
+          newMaterialContent={newMaterialContent}
+          setNewMaterialContent={setNewMaterialContent}
+          isUploadingMaterial={isUploadingMaterial}
+        />
       )}
 
       {/* 찬양 자동완성(순서용) 모달 */}
@@ -1052,109 +1053,36 @@ export default function Dashboard() {
 
       {/* 전역 찬양 관리 모달 */}
       {showSongManagerModal && (
-        <div className="song-modal-overlay" onClick={() => setShowSongManagerModal(false)}>
-          <div className="song-modal-content members-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="song-modal-header">
-              <h3>찬양 관리 (라이브러리)</h3>
-              <button className="song-modal-close" onClick={() => setShowSongManagerModal(false)}><X size={20} /></button>
-            </div>
-            
-            <div className="members-list-container">
-              <ul className="member-list">
-                {globalSongs.map(song => (
-                  <li className="member-item" key={song.id} style={{ padding: '12px' }}>
-                    <span className="member-name" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
-                      <Music size={14} color="var(--primary)" /> {song.title}
-                    </span>
-                    <div className="member-actions">
-                      {song.imageUrl ? (
-                        <button className="edit-btn" style={{ color: 'var(--primary)', padding: '6px' }} onClick={() => setViewImageState({ type: 'single', url: song.imageUrl, title: song.title })}>
-                          <ImageIcon size={14} />
-                        </button>
-                      ) : (
-                        <button className="edit-btn" style={{ padding: '6px' }} onClick={() => triggerGlobalImageUpload(song.id)} disabled={uploadingSongId === song.id}>
-                          {uploadingSongId === song.id ? <Loader2 size={14} className="spin" /> : <ImageIcon size={14} />}
-                        </button>
-                      )}
-                      <button className="edit-btn" style={{ padding: '6px' }} onClick={() => handleEditGlobalSong(song.id, song.title)}>
-                        <Edit3 size={14} />
-                      </button>
-                      <button className="edit-btn delete-btn" style={{ padding: '6px' }} onClick={() => handleDeleteGlobalSong(song.id, song.title)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {globalSongs.length === 0 && <div className="empty-suggestions">등록된 찬양이 없습니다.</div>}
-              
-              <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={handleAddGlobalSong}>
-                <Plus size={16} /> 새 찬양 등록하기
-              </button>
-            </div>
-          </div>
-        </div>
+        <SongManagerModal 
+          onClose={() => setShowSongManagerModal(false)}
+          songSearchText={songSearchText}
+          setSongSearchText={setSongSearchText}
+          handleAddGlobalSong={handleAddGlobalSong}
+          filteredSongs={filteredSongs}
+          uploadingSongId={uploadingSongId}
+          triggerGlobalImageUpload={triggerGlobalImageUpload}
+          handleOpenGallery={handleOpenGallery}
+          handleEditGlobalSong={handleEditGlobalSong}
+          handleDeleteGlobalSong={handleDeleteGlobalSong}
+        />
       )}
 
 
       {/* 교사/학생 관리 모달 */}
-      {activeModalType && (
-        <div className="song-modal-overlay" onClick={() => setActiveModalType(null)}>
-          <div className="song-modal-content members-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="song-modal-header">
-              <h3>{modalTitle}</h3>
-              <button className="song-modal-close" onClick={() => setActiveModalType(null)}><X size={20} /></button>
-            </div>
-            
-            <div className="members-list-container">
-              {currentDepts.length > 0 ? (
-                currentDepts.map(dept => (
-                  <div className="department-card" key={dept.id}>
-                    <div className="department-header">
-                      <h4>{dept.name}</h4>
-                      <div className="department-actions">
-                        <button className="edit-btn" onClick={() => handleEditDepartment(dept.id, dept.name)}>
-                          <Edit3 size={14} />
-                        </button>
-                        <button className="edit-btn delete-btn" onClick={() => handleDeleteDepartment(dept.id, dept.name)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <ul className="member-list">
-                      {dept.members && dept.members.map(member => (
-                        <li className="member-item" key={member.id}>
-                          <span className="member-name">{member.name}</span>
-                          <div className="member-actions">
-                            <button className="edit-btn" onClick={() => handleEditMember(dept.id, member.id, member.name)}>
-                              <Edit3 size={14} />
-                            </button>
-                            <button className="edit-btn delete-btn" onClick={() => handleDeleteMember(dept.id, member.id, member.name)}>
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                      <li>
-                        <button className="add-member-btn" onClick={() => handleAddMember(dept.id)}>
-                          <Plus size={14} /> {modalAddMemberText}
-                        </button>
-                      </li>
-                    </ul>
-                  </div>
-                ))
-              ) : (
-                <div className="empty-suggestions">등록된 데이터가 없습니다.</div>
-              )}
-              
-              <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={handleAddDepartment}>
-                <Plus size={16} /> {modalAddDeptText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MemberManagerModal 
+        activeModalType={activeModalType}
+        onClose={() => setActiveModalType(null)}
+        currentDepts={currentDepts}
+        modalTitle={modalTitle}
+        modalAddDeptText={modalAddDeptText}
+        modalAddMemberText={modalAddMemberText}
+        handleAddDepartment={handleAddDepartment}
+        handleEditDepartment={handleEditDepartment}
+        handleDeleteDepartment={handleDeleteDepartment}
+        handleAddMember={handleAddMember}
+        handleEditMember={handleEditMember}
+        handleDeleteMember={handleDeleteMember}
+      />
 
     </div>
   );

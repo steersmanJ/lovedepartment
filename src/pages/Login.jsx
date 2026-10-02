@@ -1,22 +1,63 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn } from 'lucide-react';
+import { LogIn, Loader2 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleLogin = (e) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleLogin = async (e) => {
     e.preventDefault();
-    // For demo purposes, we're using a simple shared password.
-    // In the future, this can be replaced with Firebase Auth.
-    if (password === '1234') { 
-      localStorage.setItem('isAuthenticated', 'true');
-      navigate('/');
-    } else {
+    if (!password) return;
+
+    setIsLoading(true);
+    setError('');
+
+    let email = '';
+    // Map simple passwords to virtual accounts
+    if (password === '0121') email = 'editor@loveservice.com';
+    else if (password === '5257') email = 'admin@loveservice.com';
+    else {
       setError('비밀번호가 일치하지 않습니다.');
+      setIsLoading(false);
+      return;
     }
+
+    const authPassword = password + '00'; // Supabase requires min 6 chars
+
+    // 1. Try to sign in
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password: authPassword,
+    });
+
+    if (signInError) {
+      // If user doesn't exist, try to sign up automatically (assuming email confirmation is disabled)
+      if (signInError.message.includes('Invalid login credentials')) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password: authPassword,
+        });
+
+        if (signUpError) {
+          setError('로그인/가입 실패: ' + signUpError.message);
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        setError('로그인 실패: ' + signInError.message);
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    localStorage.setItem('isAuthenticated', 'true');
+    navigate('/');
+    setIsLoading(false);
   };
 
   return (
@@ -40,12 +81,12 @@ export default function Login() {
             />
             {error && <p style={{ color: 'var(--error)', fontSize: '0.85rem', marginTop: '8px' }}>{error}</p>}
           </div>
-          <button type="submit" className="btn btn-primary">
-            입장하기
+          <button type="submit" className="btn btn-primary" disabled={isLoading}>
+            {isLoading ? <Loader2 size={18} className="spin" /> : '입장하기'}
           </button>
         </form>
         <p style={{ marginTop: '20px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          임시 비밀번호는 <strong>1234</strong> 입니다.
+          (관계자 외 접근 금지)
         </p>
       </div>
     </div>

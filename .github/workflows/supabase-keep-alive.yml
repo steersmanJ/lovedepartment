@@ -1,0 +1,38 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # 한국 시간 기준 매주 월, 수, 금 오전 9시 (UTC 00:00) 자동 실행
+    - cron: '0 0 * * 1,3,5'
+  workflow_dispatch: # GitHub Actions 탭에서 수동 실행(테스트) 가능
+
+jobs:
+  ping:
+    name: Ping Supabase REST API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Keep-Alive Request
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          TARGET_URL="${SUPABASE_URL:-https://otygxockbycmgfkvasjb.supabase.co}"
+
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_ANON_KEY secret is not set! Please add it in GitHub Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          echo "Pinging Supabase REST API at $TARGET_URL ..."
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X GET "$TARGET_URL/rest/v1/materials?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Supabase ping success! (HTTP $HTTP_STATUS)"
+            echo "Project activity successfully recorded. 7-day sleep prevented."
+          else
+            echo "❌ Supabase ping failed with HTTP $HTTP_STATUS"
+            cat response.json
+            exit 1
+          fi

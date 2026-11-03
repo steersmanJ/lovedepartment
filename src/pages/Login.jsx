@@ -12,22 +12,23 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!password) return;
+    const cleanPw = password.trim();
+    if (!cleanPw) return;
 
     setIsLoading(true);
     setError('');
 
     let email = '';
     // Map simple passwords to virtual accounts
-    if (password === '0121') email = 'editor@loveservice.com';
-    else if (password === '5257') email = 'admin@loveservice.com';
+    if (cleanPw === '0121') email = 'editor@loveservice.com';
+    else if (cleanPw === '5257') email = 'admin@loveservice.com';
     else {
       setError('비밀번호가 일치하지 않습니다.');
       setIsLoading(false);
       return;
     }
 
-    const authPassword = password + '00'; // Supabase requires min 6 chars
+    const authPassword = cleanPw + '00'; // Supabase requires min 6 chars
 
     // 1. Try to sign in
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({

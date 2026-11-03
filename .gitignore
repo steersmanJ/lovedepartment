@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment & deployment
+.env
+.env.*
+!.env.example
+.firebase
+

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download, Printer } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Calendar, Edit3, Image as ImageIcon, Plus, Loader2, Lock, Unlock, ChevronUp, ChevronDown, Trash2, Search, Music, Users, GraduationCap, Maximize, ChevronLeft, ChevronRight, Settings, FileText, Download, Printer, MessageCircle, Copy, ExternalLink } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { deleteFileFromStorage } from '../utils';
 import { useReactToPrint } from 'react-to-print';
@@ -9,6 +9,8 @@ import Toast from '../components/Toast';
 import AdminPanelModal from '../components/AdminPanelModal';
 import SongManagerModal from '../components/SongManagerModal';
 import MemberManagerModal from '../components/MemberManagerModal';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import { shareNoticeToKakao, copyNoticeLink, extractNoticeMeta, getCachedMaterials, setCachedMaterials } from '../utils/shareUtils';
 
 function getUpcomingSunday() {
   const d = new Date();
@@ -43,11 +45,16 @@ export default function Dashboard() {
   const [details, setDetails] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // Global Library States
+  // Global Library States (initialize materials from cache for 0ms instant display)
   const [globalSongs, setGlobalSongs] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [students, setStudents] = useState([]);
-  const [materials, setMaterials] = useState([]);
+  const [materials, setMaterials] = useState(() => getCachedMaterials() || []);
+  const [expandedDashboardNotices, setExpandedDashboardNotices] = useState({});
+
+  const toggleDashboardNotice = (id) => {
+    setExpandedDashboardNotices(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // UI States
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
@@ -78,22 +85,43 @@ export default function Dashboard() {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [showAdminPanelModal, setShowAdminPanelModal] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
-  const [newMaterialContent, setNewMaterialContent] = useState('');
   const [isUploadingMaterial, setIsUploadingMaterial] = useState(false);
+
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState(null);
+  const showToast = (msg, type = 'success') => setToastMessage({ message: msg, type });
+
+  // Header menu dropdown
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
 
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const printRef = useRef(null);
   const [currentUploadTarget, setCurrentUploadTarget] = useState(null);
 
+  const [isPrinting, setIsPrinting] = useState(false);
+
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: () => `사랑부_주보_${selectedDate}`,
+    onAfterPrint: () => setIsPrinting(false),
   });
 
-  const [userEmail, setUserEmail] = useState(null);
+  const triggerPrint = () => {
+    setIsPrinting(true);
+  };
 
   useEffect(() => {
+    if (isPrinting && printRef.current) {
+      handlePrint();
+    }
+  }, [isPrinting]);
+
+  const [userEmail, setUserEmail] = useState(null);
+  const initialGlobalLoadedRef = useRef(false);
+
+  useEffect(() => {
+    let isMounted = true;
     const checkAuthAndFetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       
@@ -103,39 +131,61 @@ export default function Dashboard() {
         return;
       }
       
+      if (!isMounted) return;
       setUserEmail(session.user.email);
-      setLoading(true);
-      
-      // 1. Schedules
-      const { data: schedData } = await supabase.from('schedules').select('*').eq('date', selectedDate).single();
-      if (schedData) {
-        setOrders(schedData.orders || initialServiceOrders);
-        setDetails(schedData.details || initialDetails);
+
+      if (!initialGlobalLoadedRef.current) {
+        setLoading(true);
+        // Fetch schedules + all global tables in PARALLEL instead of sequential waterfall
+        const [schedRes, songsRes, membersRes, materialsRes] = await Promise.all([
+          supabase.from('schedules').select('*').eq('date', selectedDate).single(),
+          supabase.from('songs').select('id, title, imageUrl:imageurl'),
+          supabase.from('settings').select('data').eq('id', 'members').single(),
+          supabase.from('materials').select('id, content, fileName:filename, fileUrl:fileurl, created_at').order('created_at', { ascending: false })
+        ]);
+
+        if (!isMounted) return;
+
+        if (schedRes.data) {
+          setOrders(schedRes.data.orders || initialServiceOrders);
+          setDetails(schedRes.data.details || initialDetails);
+        } else {
+          setOrders(initialServiceOrders);
+          setDetails(initialDetails);
+          supabase.from('schedules').insert({ date: selectedDate, orders: initialServiceOrders, details: initialDetails }).then(() => {});
+        }
+
+        if (songsRes.data) setGlobalSongs(songsRes.data);
+        if (membersRes.data && membersRes.data.data) {
+          setTeachers(membersRes.data.data.teachers || []);
+          setStudents(membersRes.data.data.students || []);
+        }
+        if (materialsRes.data) {
+          setMaterials(materialsRes.data);
+          setCachedMaterials(materialsRes.data);
+        }
+
+        initialGlobalLoadedRef.current = true;
+        setLoading(false);
       } else {
-        await supabase.from('schedules').insert({ date: selectedDate, orders: initialServiceOrders, details: initialDetails });
-        setOrders(initialServiceOrders);
-        setDetails(initialDetails);
+        // When only selectedDate changes, only fetch schedules for that date
+        const { data: schedData } = await supabase.from('schedules').select('*').eq('date', selectedDate).single();
+        if (!isMounted) return;
+        if (schedData) {
+          setOrders(schedData.orders || initialServiceOrders);
+          setDetails(schedData.details || initialDetails);
+        } else {
+          setOrders(initialServiceOrders);
+          setDetails(initialDetails);
+          await supabase.from('schedules').insert({ date: selectedDate, orders: initialServiceOrders, details: initialDetails });
+        }
       }
-
-      // 2. Global Songs
-      const { data: songsData } = await supabase.from('songs').select('id, title, imageUrl:imageurl');
-      if (songsData) setGlobalSongs(songsData);
-
-      // 3. Members
-      const { data: membersData } = await supabase.from('settings').select('data').eq('id', 'members').single();
-      if (membersData && membersData.data) {
-        setTeachers(membersData.data.teachers || []);
-        setStudents(membersData.data.students || []);
-      }
-
-      // 4. Materials
-      const { data: materialsData } = await supabase.from('materials').select('id, content, fileName:filename, fileUrl:fileurl, created_at').order('created_at', { ascending: false });
-      if (materialsData) setMaterials(materialsData);
-
-      setLoading(false);
     };
 
     checkAuthAndFetchData();
+    return () => {
+      isMounted = false;
+    };
   }, [navigate, selectedDate]);
 
   const handleLogout = async () => {
@@ -144,16 +194,38 @@ export default function Dashboard() {
     navigate('/login');
   };
 
+  // Keyboard navigation for gallery
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (viewImageState?.type === 'gallery') {
+        if (e.key === 'ArrowLeft') {
+          setViewImageState(prev => ({...prev, index: (prev.index - 1 + prev.images.length) % prev.images.length}));
+        } else if (e.key === 'ArrowRight') {
+          setViewImageState(prev => ({...prev, index: (prev.index + 1) % prev.images.length}));
+        } else if (e.key === 'Escape') {
+          setViewImageState(null);
+        }
+      } else if (viewImageState?.type === 'single') {
+        if (e.key === 'Escape') {
+          setViewImageState(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewImageState]);
+
   const saveFirestore = async (newOrders, newDetails = details) => {
     try {
       const { error } = await supabase.from('schedules').update({ orders: newOrders, details: newDetails }).eq('date', selectedDate);
       if (error) {
         console.error("Supabase update error:", error);
-        alert("일정 저장에 실패했습니다: " + error.message);
+        showToast("일정 저장에 실패했습니다: " + error.message, 'error');
       }
     } catch (e) {
       console.error("Update failed", e);
-      alert("저장에 실패했습니다.");
+      showToast("저장에 실패했습니다.", 'error');
     }
   };
 
@@ -162,11 +234,16 @@ export default function Dashboard() {
       const { error } = await supabase.from('settings').update({ data: { teachers: newTeachers, students: newStudents } }).eq('id', 'members');
       if (error) {
         console.error("Supabase members error:", error);
-        alert("명단 저장에 실패했습니다: " + error.message);
+        showToast("명단 저장에 실패했습니다: " + error.message, 'error');
+        return;
       }
+      // Bug fix: update local state immediately
+      setTeachers(newTeachers);
+      setStudents(newStudents);
+      showToast('명단이 저장되었습니다.');
     } catch (e) {
       console.error("Members update failed", e);
-      alert("데이터 저장에 실패했습니다.");
+      showToast("데이터 저장에 실패했습니다.", 'error');
     }
   };
 
@@ -281,7 +358,7 @@ export default function Dashboard() {
         const { data, error } = await supabase.from('songs').insert({ title, imageurl: imageUrl || null }).select('id, title, imageUrl:imageurl').single();
         if (error) {
           console.error("Error inserting global song:", error);
-          alert("찬양 곡 등록에 실패했습니다: " + error.message);
+          showToast("찬양 곡 등록에 실패했습니다: " + error.message, 'error');
         }
         if (data) setGlobalSongs(prev => [...prev, data]);
       };
@@ -334,7 +411,7 @@ export default function Dashboard() {
 
     if (uploadError) {
       console.error("Upload failed", uploadError);
-      alert("이미지 업로드에 실패했습니다.");
+      showToast("이미지 업로드에 실패했습니다.", 'error');
       setUploadingSongId(null);
       e.target.value = '';
       return;
@@ -345,7 +422,7 @@ export default function Dashboard() {
 
     if (type === 'library') {
       await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', songId);
-      setGlobalSongs(globalSongs.map(s => s.id === songId ? { ...s, imageUrl: downloadURL } : s));
+      setGlobalSongs(prev => prev.map(s => s.id === songId ? { ...s, imageUrl: downloadURL } : s));
     } else {
       // Update order
       let songTitle = '';
@@ -373,12 +450,12 @@ export default function Dashboard() {
         const existing = globalSongs.find(g => g.title === songTitle);
         if (existing) {
           const { error } = await supabase.from('songs').update({ imageurl: downloadURL }).eq('id', existing.id);
-          if (error) alert("찬양 이미지 업데이트 실패: " + error.message);
-          setGlobalSongs(globalSongs.map(s => s.id === existing.id ? { ...s, imageUrl: downloadURL } : s));
+          if (error) showToast("찬양 이미지 업데이트 실패: " + error.message, 'error');
+          setGlobalSongs(prev => prev.map(s => s.id === existing.id ? { ...s, imageUrl: downloadURL } : s));
         } else {
           const addSong = async () => {
             const { data, error } = await supabase.from('songs').insert({ title: songTitle, imageurl: downloadURL }).select('id, title, imageUrl:imageurl').single();
-            if (error) alert("찬양 등록 실패: " + error.message);
+            if (error) showToast("찬양 등록 실패: " + error.message, 'error');
             if(data) setGlobalSongs(prev => [...prev, data]);
           };
           addSong();
@@ -396,12 +473,12 @@ export default function Dashboard() {
     if (!title || !title.trim()) return;
     const existing = globalSongs.find(g => g.title === title.trim());
     if (existing) {
-      alert("이미 등록된 찬양입니다.");
+      showToast("이미 등록된 찬양입니다.", 'error');
       return;
     }
     const { data, error } = await supabase.from('songs').insert({ title: title.trim(), imageurl: null }).select('id, title, imageUrl:imageurl').single();
     if (error) {
-      alert("찬양 추가 실패: " + error.message);
+      showToast("찬양 추가 실패: " + error.message, 'error');
       return;
     }
     if(data) setGlobalSongs([...globalSongs, data]);
@@ -411,7 +488,7 @@ export default function Dashboard() {
     const newTitle = prompt("찬양 제목을 수정하세요", oldTitle);
     if (!newTitle || !newTitle.trim()) return;
     await supabase.from('songs').update({ title: newTitle.trim() }).eq('id', id);
-    setGlobalSongs(globalSongs.map(s => s.id === id ? { ...s, title: newTitle.trim() } : s));
+    setGlobalSongs(prev => prev.map(s => s.id === id ? { ...s, title: newTitle.trim() } : s));
   };
 
   const handleDeleteGlobalSong = async (id, title, imageUrl) => {
@@ -513,23 +590,47 @@ export default function Dashboard() {
 
   const handleAdminLogin = async (e) => {
     e.preventDefault();
-    if (adminPasswordInput === '5257') {
-      // Background upgrade to admin
-      await supabase.auth.signInWithPassword({ email: 'admin@loveservice.com', password: '525700' });
+    const cleanPw = adminPasswordInput.trim();
+    if (!cleanPw) return;
+
+    if (cleanPw === '5257') {
+      try {
+        await supabase.auth.signInWithPassword({
+          email: 'admin@loveservice.com',
+          password: cleanPw + '00',
+        });
+      } catch (err) {
+        console.warn('Admin auth sync:', err);
+      }
       setUserEmail('admin@loveservice.com');
       setShowAdminAuthModal(false);
       setShowAdminPanelModal(true);
       setAdminPasswordInput('');
+      showToast("관리자 모드로 전환되었습니다.", 'success');
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: 'admin@loveservice.com',
+      password: cleanPw + '00',
+    });
+    if (!error) {
+      setUserEmail('admin@loveservice.com');
+      setShowAdminAuthModal(false);
+      setShowAdminPanelModal(true);
+      setAdminPasswordInput('');
+      showToast("관리자 모드로 전환되었습니다.", 'success');
     } else {
-      alert("비밀번호가 틀렸습니다.");
+      showToast("비밀번호가 틀렸습니다.", 'error');
       setAdminPasswordInput('');
     }
   };
 
-  const handleAddMaterial = async (e) => {
+  const handleAddMaterial = async (e, contentText = '') => {
     e.preventDefault();
-    const file = e.target.materialFile.files[0];
-    if (!newMaterialContent.trim() && !file) return;
+    const file = e.target.materialFile?.files?.[0];
+    const cleanContent = (contentText || '').trim();
+    if (!cleanContent && !file) return false;
 
     setIsUploadingMaterial(true);
     let fileUrl = null;
@@ -540,25 +641,29 @@ export default function Dashboard() {
       const uniqueName = `mat_${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from('sheet-music').upload(`materials/${uniqueName}`, file);
       if (uploadError) {
-        alert("파일 업로드 실패: " + uploadError.message);
+        showToast("파일 업로드 실패: " + uploadError.message, 'error');
         setIsUploadingMaterial(false);
-        return;
+        return false;
       }
       const { data: publicUrlData } = supabase.storage.from('sheet-music').getPublicUrl(`materials/${uniqueName}`);
       fileUrl = publicUrlData.publicUrl;
       fileName = file.name;
     }
 
-    const newMat = { content: newMaterialContent.trim(), fileurl: fileUrl, filename: fileName };
+    const newMat = { content: cleanContent, fileurl: fileUrl, filename: fileName };
     const { data, error } = await supabase.from('materials').insert(newMat).select('id, content, fileName:filename, fileUrl:fileurl, created_at').single();
     if (error) {
-      alert("등록 실패: " + error.message);
+      showToast("등록 실패: " + error.message, 'error');
+      setIsUploadingMaterial(false);
+      return false;
     } else {
-      setMaterials([data, ...materials]);
-      setNewMaterialContent('');
+      const updated = [data, ...materials];
+      setMaterials(updated);
+      setCachedMaterials(updated);
       e.target.reset();
     }
     setIsUploadingMaterial(false);
+    return true;
   };
 
   const handleDeleteMaterial = async (id) => {
@@ -570,16 +675,22 @@ export default function Dashboard() {
     }
 
     const { error } = await supabase.from('materials').delete().eq('id', id);
-    if (error) alert("삭제 실패: " + error.message);
-    else setMaterials(materials.filter(m => m.id !== id));
+    if (error) {
+      showToast("삭제 실패: " + error.message, 'error');
+    } else {
+      const updated = materials.filter(m => m.id !== id);
+      setMaterials(updated);
+      setCachedMaterials(updated);
+    }
   };
 
 
 
   if (loading && orders.length === 0) {
     return (
-      <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <p>로딩 중...</p>
+      <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: '16px' }}>
+        <Loader2 size={36} className="spin" style={{ color: 'var(--primary)' }} />
+        <p style={{ color: 'var(--text-muted)', fontWeight: 600 }}>예배 정보를 불러오는 중...</p>
       </div>
     );
   }
@@ -604,25 +715,25 @@ export default function Dashboard() {
               className="date-picker-input"
             />
           </div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setShowSongManagerModal(true)}>
-              <Music size={14} /> 찬양 관리
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button className="logout-btn" style={{ backgroundColor: '#2196f3', color: 'white', padding: '6px 12px', fontWeight: 'bold' }} onClick={triggerPrint} title="주보 인쇄 및 PDF 저장">
+              <Printer size={14} /> 주보
             </button>
-            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setActiveModalType('teacher')}>
-              <Users size={14} /> 교사 관리
-            </button>
-            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={() => setActiveModalType('student')}>
-              <GraduationCap size={14} /> 학생 관리
-            </button>
-            <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 8px' }} onClick={handleAdminMenuClick} title="관리자 메뉴">
-              <Settings size={14} /> 관리자
-            </button>
-            <button className="logout-btn" style={{ backgroundColor: '#2196f3', color: 'white', padding: '6px 12px', fontWeight: 'bold' }} onClick={handlePrint} title="주보 인쇄 및 PDF 저장">
-              <Printer size={14} /> 주보 인쇄/PDF
-            </button>
-            <button className="logout-btn" style={{ padding: '6px' }} onClick={handleLogout} title="로그아웃">
-              <LogOut size={14} />
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button className="logout-btn" style={{ backgroundColor: 'rgba(255,255,255,0.3)', padding: '6px 10px' }} onClick={() => setShowHeaderMenu(!showHeaderMenu)}>
+                <Settings size={14} /> 메뉴 ▾
+              </button>
+              {showHeaderMenu && (
+                <div className="header-dropdown" onClick={() => setShowHeaderMenu(false)}>
+                  <button onClick={() => setShowSongManagerModal(true)}><Music size={14} /> 찬양 관리</button>
+                  <button onClick={() => setActiveModalType('teacher')}><Users size={14} /> 교사 관리</button>
+                  <button onClick={() => setActiveModalType('student')}><GraduationCap size={14} /> 학생 관리</button>
+                  <button onClick={handleAdminMenuClick}><Settings size={14} /> 관리자</button>
+                  <hr style={{ border: 'none', borderTop: '1px solid #eee', margin: '4px 0' }} />
+                  <button onClick={handleLogout} style={{ color: 'var(--error)' }}><LogOut size={14} /> 로그아웃</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -724,7 +835,7 @@ export default function Dashboard() {
                       )}
                       <div className="edit-actions">
                         <button className="btn btn-secondary" onClick={() => saveEdit(order.id)}><Check size={16} /> 저장</button>
-                        <button className="btn" onClick={() => setEditingId(null)} style={{ backgroundColor: '#eee' }}><X size={16} /> 취소</button>
+                        <button className="btn" onClick={() => setEditingId(null)} style={{ backgroundColor: 'rgba(255,255,255,0.4)' }}><X size={16} /> 취소</button>
                       </div>
                     </div>
                   ) : (
@@ -849,7 +960,7 @@ export default function Dashboard() {
                     )}
                     <div style={{ display: 'flex', gap: '8px', alignSelf: key === 'fullScripture' ? 'flex-end' : 'auto' }}>
                       <button className="btn btn-secondary" onClick={() => saveDetailEdit(key)} style={{ padding: '8px 16px' }}>저장</button>
-                      <button className="btn" onClick={() => setEditingDetail(null)} style={{ padding: '8px 16px', backgroundColor: '#eee' }}>취소</button>
+                      <button className="btn" onClick={() => setEditingDetail(null)} style={{ padding: '8px 16px', backgroundColor: 'rgba(255,255,255,0.4)' }}>취소</button>
                     </div>
                   </div>
                 ) : (
@@ -861,43 +972,180 @@ export default function Dashboard() {
         </div>
 
         {/* 공지사항 및 자료 카드 */}
-        {materials.length > 0 && (
-          <div className="card materials-card" style={{ marginTop: '24px' }}>
-            <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileText size={20} /> 공지사항 및 자료
-            </h2>
-            <div className="materials-list">
-              {materials.map(mat => (
+        <div className="card materials-card" style={{ marginTop: '24px' }}>
+          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FileText size={20} /> 공지사항 및 자료
+          </h2>
+          <div className="materials-list">
+            {materials.length > 0 ? materials.map((mat) => {
+              const isExpanded = !!expandedDashboardNotices[mat.id];
+              const meta = extractNoticeMeta(mat.content, mat.fileName);
+
+              return (
                 <div key={mat.id} className="material-item">
-                  {mat.content && <div className="material-content" style={{ whiteSpace: 'pre-line', marginBottom: mat.fileName ? '12px' : '0' }}>{mat.content}</div>}
-                  {mat.fileName && (
-                    <a href={mat.fileUrl} target="_blank" rel="noopener noreferrer" className="material-file-btn btn btn-secondary">
-                      <Download size={14} /> {mat.fileName}
-                    </a>
-                  )}
-                  <div className="material-date">
-                    {new Date(mat.created_at).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {/* 상단 툴바: 제목/토글 & 작성일시 & 카카오톡/링크 공유 버튼 */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px', paddingBottom: '10px', borderBottom: '1px solid rgba(0, 0, 0, 0.06)' }}>
+                    <div 
+                      onClick={() => toggleDashboardNotice(mat.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flex: 1, minWidth: '180px' }}
+                      title={isExpanded ? '내용 접기' : '내용 펼쳐보기'}
+                    >
+                      {isExpanded ? <ChevronUp size={17} color="var(--primary)" /> : <ChevronDown size={17} color="var(--text-muted)" />}
+                      <span style={{ fontWeight: 700, fontSize: '0.96rem', color: isExpanded ? 'var(--primary-dark)' : 'var(--text-main)' }}>
+                        {meta.title}
+                      </span>
+                      <span className="material-date" style={{ marginTop: 0, marginLeft: '4px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {new Date(mat.created_at).toLocaleString('ko-KR', { month: 'long', day: 'numeric' })}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button 
+                        type="button"
+                        onClick={() => shareNoticeToKakao({ id: mat.id, content: mat.content, fileName: mat.fileName, onToast: showToast })}
+                        style={{
+                          background: '#FEE500',
+                          color: '#191919',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '5px 10px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
+                        }}
+                        title="카카오톡으로 공유"
+                      >
+                        <MessageCircle size={14} fill="#191919" /> 카톡 공유
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await copyNoticeLink(mat.id);
+                            showToast('공지 링크가 클립보드에 복사되었습니다!', 'success');
+                          } catch(e) {
+                            showToast('링크 복사 실패', 'error');
+                          }
+                        }}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.85)',
+                          color: 'var(--text-main)',
+                          border: '1px solid rgba(0, 0, 0, 0.1)',
+                          borderRadius: '8px',
+                          padding: '5px 9px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          cursor: 'pointer'
+                        }}
+                        title="링크 복사"
+                      >
+                        <Copy size={13} /> 복사
+                      </button>
+                      <a 
+                        href={`/notice/${mat.id}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.85)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid rgba(0, 0, 0, 0.1)',
+                          borderRadius: '8px',
+                          padding: '5px 8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          textDecoration: 'none'
+                        }}
+                        title="공지 전용창 새 탭으로 열기"
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    </div>
                   </div>
+
+                  {!isExpanded ? (
+                    <div 
+                      onClick={() => toggleDashboardNotice(mat.id)}
+                      style={{
+                        padding: '10px 12px',
+                        background: 'rgba(255, 255, 255, 0.55)',
+                        borderRadius: '10px',
+                        border: '1px dashed rgba(231, 111, 81, 0.25)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
+                      }}
+                    >
+                      <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.5' }}>
+                        {meta.description}
+                      </p>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--primary-dark)' }}>
+                        ▼ 전체 내용 펼쳐보기
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      {(mat.content || mat.fileUrl) && (
+                        <div className="material-content" style={{ marginBottom: mat.fileName ? '12px' : '8px' }}>
+                          <MarkdownRenderer content={mat.content} fileUrl={mat.fileUrl} />
+                        </div>
+                      )}
+                      {mat.fileName && (
+                        <a href={mat.fileUrl} target="_blank" rel="noopener noreferrer" className="material-file-btn btn btn-secondary" style={{ marginBottom: '8px' }}>
+                          <Download size={14} /> {mat.fileName}
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleDashboardNotice(mat.id)}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          background: 'rgba(0, 0, 0, 0.03)',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ▲ 내용 접기
+                      </button>
+                    </>
+                  )}
                 </div>
-              ))}
-            </div>
+              );
+            }) : (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                등록된 공지사항이 없습니다.
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
       </main>
 
-      <div style={{ display: 'none' }}>
-        <BulletinLayout 
-          ref={printRef} 
-          date={selectedDate} 
-          orders={orders} 
-          details={details} 
-          materials={materials} 
-          teachers={teachers} 
-          students={students} 
-          bgImageUrl={null} // 추후 관리자 메뉴에서 배경 이미지 업로드 시 연동 가능
-        />
-      </div>
+      {isPrinting && (
+        <div style={{ display: 'none' }}>
+          <BulletinLayout 
+            ref={printRef} 
+            date={selectedDate} 
+            orders={orders} 
+            details={details} 
+            materials={materials} 
+            teachers={teachers} 
+            students={students} 
+            bgImageUrl={null} // 추후 관리자 메뉴에서 배경 이미지 업로드 시 연동 가능
+          />
+        </div>
+      )}
 
       {/* 이미지 팝업 모달 */}
       {viewImageState && (
@@ -990,8 +1238,6 @@ export default function Dashboard() {
           materials={materials}
           handleAddMaterial={handleAddMaterial}
           handleDeleteMaterial={handleDeleteMaterial}
-          newMaterialContent={newMaterialContent}
-          setNewMaterialContent={setNewMaterialContent}
           isUploadingMaterial={isUploadingMaterial}
         />
       )}
@@ -1083,6 +1329,15 @@ export default function Dashboard() {
         handleEditMember={handleEditMember}
         handleDeleteMember={handleDeleteMember}
       />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <Toast 
+          message={toastMessage.message} 
+          type={toastMessage.type} 
+          onClose={() => setToastMessage(null)} 
+        />
+      )}
 
     </div>
   );

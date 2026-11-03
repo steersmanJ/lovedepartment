@@ -1,4 +1,5 @@
 import React, { forwardRef } from 'react';
+import MarkdownRenderer from './MarkdownRenderer';
 
 const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers, students, bgImageUrl }, ref) => {
   // A4 Landscape is 297mm x 210mm
@@ -65,7 +66,11 @@ const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers,
           {materials && materials.length > 0 ? (
             <ul>
               {materials.map(mat => (
-                mat.content ? <li key={mat.id}>{mat.content}</li> : null
+                mat.content ? (
+                  <li key={mat.id}>
+                    <MarkdownRenderer content={mat.content} />
+                  </li>
+                ) : null
               ))}
             </ul>
           ) : (
@@ -175,6 +180,23 @@ const BulletinLayout = forwardRef(({ date, orders, details, materials, teachers,
 
         .bulletin-materials li {
           margin-bottom: 8pt;
+        }
+
+        .bulletin-materials table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 8.5pt;
+          margin: 6pt 0;
+        }
+
+        .bulletin-materials th, .bulletin-materials td {
+          border: 1px solid #ddd;
+          padding: 4pt 6pt;
+          text-align: left;
+        }
+
+        .bulletin-materials th {
+          background-color: #f5f5f5;
         }
 
         .bulletin-people {
